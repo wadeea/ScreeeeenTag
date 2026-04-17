@@ -1,0 +1,12 @@
+{
+  "name": "OmniESL Cloud Management Platform",
+  "description": "Enterprise-grade Electronic Shelf Label (ESL) management system featuring real-time MQTT task engine, E-ink template rendering, and multi-user dashboard.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "Real-time IoT Management",
+    "ESL Rendering Engine",
+    "MQTT Task Distribution"
+  ]
+}
