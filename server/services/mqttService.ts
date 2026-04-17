@@ -2,6 +2,7 @@ import mqtt, { MqttClient } from 'mqtt';
 import { EventEmitter } from 'events';
 import { logger } from '../lib/logger';
 import { dbProvider } from './dbProvider';
+import { etagAdapter } from './etagAdapter';
 
 export class MqttService extends EventEmitter {
   private client: MqttClient | null = null;
@@ -50,7 +51,7 @@ export class MqttService extends EventEmitter {
     });
 
     this.client.on('message', (topic, payload) => {
-      this.handleIncoming(topic, payload.toString());
+      this.handleIncoming(topic, payload);
     });
 
     this.client.on('error', (err) => {
@@ -72,20 +73,22 @@ export class MqttService extends EventEmitter {
     logger.info('Subscribed to infrastructure topics');
   }
 
-  private handleIncoming(topic: string, message: string) {
+  private handleIncoming(topic: string, payload: Buffer) {
     try {
       const parts = topic.split('/');
       const apId = parts[2];
       const type = parts[3];
-      const data = JSON.parse(message);
 
       if (type === 'heartbeat') {
-        this.emit('ap:heartbeat', { apId, ...data });
+        const { interpreted, raw } = etagAdapter.parseHeartbeat(payload);
+        this.emit('ap:heartbeat', { apId, ...interpreted, raw });
       } else if (type === 'result') {
+        // Result parsing will be handled in Phase 4/5
+        const data = JSON.parse(payload.toString());
         this.emit('task:result', { apId, ...data });
       }
-    } catch (err) {
-      logger.warn({ topic, message }, 'Failed to parse MQTT message');
+    } catch (err: any) {
+      logger.warn({ topic, err: err.message }, 'Failed to parse MQTT message');
     }
   }
 

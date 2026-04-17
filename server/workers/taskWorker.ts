@@ -30,9 +30,9 @@ export const taskWorker = new Worker(
       const buffer = await renderer.generateEInkBitmap(product);
       
       // 4. Find Target Tag and AP
-      const tagRes = await dbProvider.query('SELECT ap_id FROM tags WHERE id = $1', [targetId]);
+      const tagRes = await dbProvider.query('SELECT current_ap_id FROM tags WHERE id = $1', [targetId]);
       if (tagRes.rowCount === 0) throw new Error(`Tag not found: ${targetId}`);
-      const apId = tagRes.rows[0].ap_id;
+      const apId = tagRes.rows[0].current_ap_id;
 
       // 5. Publish to MQTT via AP
       await job.updateProgress(90);
@@ -53,7 +53,7 @@ export const taskWorker = new Worker(
       logger.error({ taskId, error: error.message }, 'Task worker failure');
       
       await dbProvider.query(
-        'UPDATE tasks SET status = $1, error_log = $2, updated_at = NOW() WHERE id = $3',
+        'UPDATE tasks SET status = $1, error_message = $2, updated_at = NOW() WHERE id = $3',
         ['FAILED', error.message, taskId]
       );
       

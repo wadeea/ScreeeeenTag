@@ -54,7 +54,7 @@ async function startProductionServer() {
   });
 
   app.post('/api/tags/bind', async (req, res) => {
-    const { tagId, sku } = req.body;
+    const { tag_id, sku } = req.body;
     
     // transactional binding + task creation
     const client = await dbProvider.getClient();
@@ -70,21 +70,26 @@ async function startProductionServer() {
         `INSERT INTO bindings (tag_id, product_id, updated_at) 
          VALUES ($1, $2, NOW())
          ON CONFLICT (tag_id) DO UPDATE SET product_id = EXCLUDED.product_id, updated_at = NOW()`,
-        [tagId, productId]
+        [tag_id, productId]
       );
 
-      // Create Task
+      // 4. Find Target Tag and AP (Needed for task record)
+      const tagRes = await client.query('SELECT current_ap_id FROM tags WHERE id = $1', [tag_id]);
+      if (tagRes.rowCount === 0) throw new Error(`Tag not found: ${tag_id}`);
+      const apId = tagRes.rows[0].current_ap_id;
+
+      // Create Task with production fields
       const taskRes = await client.query(
-        `INSERT INTO tasks (type, target_id, status)
-         VALUES ($1, $2, $3) RETURNING id`,
-        ['UPDATE_IMAGE', tagId, 'PENDING']
+        `INSERT INTO tasks (type, target_tag_id, ap_id, status)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        ['IMAGE_UPDATE', tag_id, apId, 'PENDING']
       );
       const taskId = taskRes.rows[0].id;
 
       await client.query('COMMIT');
 
       // 3. Queue Background Job via BullMQ
-      await QueueService.addTask({ taskId, targetId: tagId, sku });
+      await QueueService.addTask({ taskId, targetId: tag_id, sku });
 
       res.status(201).json({ success: true, taskId });
     } catch (err: any) {

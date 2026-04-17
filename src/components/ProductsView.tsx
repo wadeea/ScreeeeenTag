@@ -1,36 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { 
   Plus, 
   Search, 
-  CheckCircle2, 
-  Clock, 
-  AlertTriangle,
-  RefreshCw,
   Edit2,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
-import { Product } from '../types';
+import { useStore } from '../store/useStore';
 
 export default function ProductsView() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { products, fetchData, isLoading } = useStore();
 
   useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  async function fetchProducts() {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/products');
-      const data = await res.json();
-      setProducts(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
+    fetchData();
+  }, [fetchData]);
 
   return (
     <div className="space-y-6">
@@ -71,17 +54,21 @@ export default function ProductsView() {
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 font-mono">
-            {loading ? (
+            {isLoading && products.length === 0 ? (
               [1, 2, 3].map(i => (
                 <tr key={i} className="animate-pulse">
-                  <td colSpan={5} className="p-12 text-center bg-white/5" />
+                  <td colSpan={5} className="p-12 text-center bg-white/5">
+                    <RefreshCw className="w-4 h-4 animate-spin mx-auto text-slate-500" />
+                  </td>
                 </tr>
               ))
             ) : products.map((product) => (
               <tr key={product.id} className="hover:bg-white/5 transition-colors group">
                 <td className="p-4 text-sky-400 text-xs font-bold tracking-tighter">{product.sku}</td>
                 <td className="p-4 font-sans font-medium text-slate-200 text-sm">{product.name}</td>
-                <td className="p-4 text-slate-100 font-bold text-sm">${product.price.toFixed(2)}</td>
+                <td className="p-4 text-slate-100 font-bold text-sm">
+                  {product.currency} {product.price.toFixed(2)}
+                </td>
                 <td className="p-4">
                   <span className="px-2 py-0.5 bg-slate-800/50 text-slate-400 border border-white/10 rounded text-[10px] font-bold uppercase tracking-widest">
                     {product.category}

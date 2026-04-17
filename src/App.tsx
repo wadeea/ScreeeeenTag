@@ -4,18 +4,23 @@ import OverviewView from './components/OverviewView';
 import TagFleetView from './components/TagFleetView';
 import ProductsView from './components/ProductsView';
 import MockMobileScanner from './components/MockMobileScanner';
+import { useSocket } from './hooks/useSocket';
+import { useStore } from './store/useStore';
 import { 
   Bell, 
   Search, 
   Smartphone, 
-  User, 
-  HelpCircle,
-  Menu
+  Menu,
+  WifiOff
 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const { error, setError } = useStore();
+  
+  // Initialize real-time bridge
+  useSocket();
 
   const renderView = () => {
     switch (activeTab) {
@@ -84,6 +89,23 @@ export default function App() {
 
       {/* Mobile Experience Demo overlay */}
       {isScannerOpen && <MockMobileScanner onClose={() => setIsScannerOpen(false)} />}
+
+      {/* Connection Error Toast */}
+      {error && (
+        <div className="fixed bottom-6 right-6 bg-red-500 text-white px-6 py-4 rounded-xl shadow-2xl z-[100] flex items-center gap-4 animate-in slide-in-from-bottom-5">
+          <WifiOff className="w-5 h-5" />
+          <div className="flex-1">
+            <p className="text-sm font-bold">Network Connectivity Alert</p>
+            <p className="text-[10px] opacity-80">{error}</p>
+          </div>
+          <button 
+            onClick={() => setError(null)}
+            className="text-white/50 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -14,23 +14,26 @@ export class DeviceStateHandler {
   private init() {
     const mqtt = MqttService.getInstance();
 
-    // 1. Handle AP Heartbeats
+    // 1. Handle AP Heartbeats (MessagePack Interpreted)
     mqtt.on('ap:heartbeat', async (data) => {
-      const { apId, ip, version, status } = data;
-      logger.debug({ apId }, 'Heartbeat received from AP');
+      const { apId, version, status, targetServer } = data;
+      logger.debug({ apId, version }, 'Hardware heartbeat synchronized');
+
+      // Use targetServer.host if available, or fallback
+      const ip = targetServer?.host || '0.0.0.0';
 
       await dbProvider.query(
-        `INSERT INTO access_points (id, ip_address, firmware_version, status, last_seen)
+        `INSERT INTO access_points (id, ip_address, firmware_version, status, last_heartbeat)
          VALUES ($1, $2, $3, $4, NOW())
          ON CONFLICT (id) DO UPDATE SET
          ip_address = EXCLUDED.ip_address,
          firmware_version = EXCLUDED.firmware_version,
          status = EXCLUDED.status,
-         last_seen = EXCLUDED.last_seen`,
-        [apId, ip, version, status || 'ONLINE']
+         last_heartbeat = EXCLUDED.last_heartbeat`,
+        [apId, ip, version, 'ONLINE'] // Hardware is sending heartbeat, so it's ONLINE
       );
 
-      this.io.emit('ap:status', { apId, status: 'ONLINE', lastSeen: new Date() });
+      this.io.emit('ap:status', { apId, status: 'ONLINE', last_heartbeat: new Date() });
     });
 
     // 2. Handle Task Results (SENT -> ACK -> DISPLAYED)
