@@ -17,20 +17,36 @@ export class MqttService extends EventEmitter {
     
     this.client = mqtt.connect(brokerUrl, {
       clientId: `omni_esl_cloud_${Math.random().toString(16).slice(2)}`,
-      clean: false, // Persistent session
-      reconnectPeriod: 1000,
+      username: process.env.MQTT_USER,
+      password: process.env.MQTT_PASS,
+      protocolVersion: 5,
+      clean: false, // Persistent session for reliability
+      reconnectPeriod: 2000,
       connectTimeout: 30 * 1000,
+      protocol: brokerUrl.startsWith('mqtts') ? 'mqtts' : 'mqtt',
+      rejectUnauthorized: false, // In many IoT setups we use self-signed certs initially
+      properties: {
+        sessionExpiryInterval: 3600 // 1 hour session persistence on broker side
+      },
       will: {
         topic: 'omni/cloud/status',
-        payload: 'offline',
+        payload: Buffer.from(JSON.stringify({ status: 'offline', timestamp: Date.now() })),
         qos: 1,
         retain: true
       }
     });
 
-    this.client.on('connect', () => {
-      logger.info('Connected to production MQTT broker');
+    this.client.on('connect', (connack) => {
+      logger.info({ sessionPresent: connack.sessionPresent }, 'Connected to Mosquitto MQTT broker');
       this.subscribeToCoreTopics();
+    });
+
+    this.client.on('reconnect', () => {
+      logger.warn('MQTT client attempting to reconnect...');
+    });
+
+    this.client.on('offline', () => {
+      logger.warn('MQTT client is offline');
     });
 
     this.client.on('message', (topic, payload) => {
@@ -89,5 +105,17 @@ export class MqttService extends EventEmitter {
         }
       );
     });
+  }
+
+  public async disconnect() {
+    if (this.client) {
+      logger.info('Disconnecting MQTT client...');
+      return new Promise((resolve) => {
+        this.client?.end(false, {}, () => {
+          logger.info('MQTT client disconnected');
+          resolve(true);
+        });
+      });
+    }
   }
 }

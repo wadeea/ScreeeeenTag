@@ -1,4 +1,4 @@
-import { Queue, Worker, Job } from 'bullmq';
+import { Queue, Worker, Job, QueueEvents } from 'bullmq';
 import IORedis from 'ioredis';
 import { logger } from '../lib/logger';
 
@@ -19,14 +19,30 @@ export class QueueService {
         type: 'exponential',
         delay: 5000,
       },
-      removeOnComplete: true,
-      removeOnFail: false,
+      removeOnComplete: {
+        age: 3600, // keep for 1 hour
+        count: 1000,
+      },
+      removeOnFail: {
+        age: 24 * 3600, // keep failed for 24 hours
+      },
     },
   });
 
+  public static queueEvents = new QueueEvents(TASK_QUEUE_NAME, {
+    connection: redisConnection,
+  });
+
   public static async addTask(payload: any) {
-    const job = await this.taskQueue.add('process-tag-update', payload);
-    logger.info({ jobId: job.id, targetId: payload.targetId }, 'Task added to BullMQ');
+    const job = await this.taskQueue.add('process-tag-update', payload, {
+      priority: payload.priority || 10,
+    });
+    logger.info({ jobId: job.id, targetId: payload.targetId, type: payload.type }, 'Task added to BullMQ');
     return job;
+  }
+
+  public static async getJobStatus(jobId: string) {
+    const job = await this.taskQueue.getJob(jobId);
+    return job ? await job.getState() : 'not_found';
   }
 }

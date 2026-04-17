@@ -13,17 +13,20 @@ export const taskWorker = new Worker(
 
     try {
       // 1. Mark task as PROCESSING (SENT stage)
+      await job.updateProgress(10);
       await dbProvider.query(
-        'UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2',
-        ['SENT', taskId]
+        'UPDATE tasks SET status = $1, updated_at = NOW(), retry_count = $2 WHERE id = $3',
+        ['SENT', job.attemptsMade, taskId]
       );
 
       // 2. Fetch Product Data
+      await job.updateProgress(30);
       const prodRes = await dbProvider.query('SELECT * FROM products WHERE sku = $1', [sku]);
       if (prodRes.rowCount === 0) throw new Error(`Product not found: ${sku}`);
       const product = prodRes.rows[0];
 
       // 3. Render Image Node (Advanced Render)
+      await job.updateProgress(60);
       const buffer = await renderer.generateEInkBitmap(product);
       
       // 4. Find Target Tag and AP
@@ -32,6 +35,7 @@ export const taskWorker = new Worker(
       const apId = tagRes.rows[0].ap_id;
 
       // 5. Publish to MQTT via AP
+      await job.updateProgress(90);
       const mqtt = MqttService.getInstance();
       await mqtt.publish(`/estation/${apId}/task`, {
         taskId,
@@ -41,9 +45,10 @@ export const taskWorker = new Worker(
         timestamp: Date.now()
       });
 
-      logger.info({ taskId, apId, targetId }, 'Payload dispatched to Access Point');
+      logger.info({ taskId, apId, targetId, attempt: job.attemptsMade }, 'Payload dispatched to Access Point');
+      await job.updateProgress(100);
       
-      return { status: 'SENT' };
+      return { status: 'SENT', taskId };
     } catch (error: any) {
       logger.error({ taskId, error: error.message }, 'Task worker failure');
       

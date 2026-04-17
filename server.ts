@@ -23,6 +23,12 @@ async function startProductionServer() {
 
   app.use(express.json());
 
+  // Request Logging
+  app.use((req, res, next) => {
+    logger.info({ method: req.method, url: req.url }, 'Incoming request');
+    next();
+  });
+
   // 1. Core Services Init
   const mqtt = MqttService.getInstance();
   new DeviceStateHandler(io);
@@ -92,6 +98,11 @@ async function startProductionServer() {
 
   app.get('/api/tasks', async (req, res) => {
     const result = await dbProvider.query('SELECT * FROM tasks ORDER BY created_at DESC LIMIT 50');
+    res.json(result.rows);
+  });
+
+  app.get('/api/aps', async (req, res) => {
+    const result = await dbProvider.query('SELECT * FROM access_points ORDER BY id ASC');
     res.json(result.rows);
   });
 

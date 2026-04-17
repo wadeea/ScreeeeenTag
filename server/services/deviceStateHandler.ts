@@ -35,13 +35,23 @@ export class DeviceStateHandler {
 
     // 2. Handle Task Results (SENT -> ACK -> DISPLAYED)
     mqtt.on('task:result', async (data) => {
-      const { taskId, tagId, status, battery, rssi } = data;
-      logger.info({ taskId, tagId, status }, 'Task result received');
+      const { taskId, tagId, status, battery, rssi, type } = data;
+      logger.info({ taskId, tagId, status, type }, 'Task event received');
 
-      // Update Task State
+      // Handle intermediate ACK stage
+      if (type === 'ACK') {
+        await dbProvider.query(
+          'UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2',
+          ['ACK', taskId]
+        );
+        this.io.emit('task:update', { taskId, status: 'ACK' });
+        return;
+      }
+
+      // Handle final result stage (DISPLAYED / FAILED)
       const taskStatus = status === 'OK' ? 'DISPLAYED' : 'FAILED';
       await dbProvider.query(
-        'UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2',
+        'UPDATE tasks SET status = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2',
         [taskStatus, taskId]
       );
 
