@@ -3,6 +3,8 @@ import { redisConnection, TASK_QUEUE_NAME } from '../services/queueService';
 import { dbProvider } from '../services/dbProvider';
 import { MqttService } from '../services/mqttService';
 import { renderer } from '../services/rendererService';
+import { etagAdapter } from '../services/etagAdapter';
+import { getSpecFromId } from '../constants/hardwareSpecs';
 import { logger } from '../lib/logger';
 
 export const taskWorker = new Worker(
@@ -25,27 +27,36 @@ export const taskWorker = new Worker(
       if (prodRes.rowCount === 0) throw new Error(`Product not found: ${sku}`);
       const product = prodRes.rows[0];
 
-      // 3. Render Image Node (Advanced Render)
+      // 3. Detect Tag Resolution
+      const spec = getSpecFromId(targetId);
+      logger.info({ targetId, model: spec.model }, 'Task target specs detected');
+
+      // 4. Render Image Node (Model-Specific Render)
       await job.updateProgress(60);
-      const buffer = await renderer.generateEInkBitmap(product);
+      const buffer = await renderer.generateEInkBitmap(
+        product, 
+        spec.resolution.width, 
+        spec.resolution.height
+      );
       
-      // 4. Find Target Tag and AP
+      // 5. Find Target AP
       const tagRes = await dbProvider.query('SELECT current_ap_id FROM tags WHERE id = $1', [targetId]);
       if (tagRes.rowCount === 0) throw new Error(`Tag not found: ${targetId}`);
       const apId = tagRes.rows[0].current_ap_id;
 
-      // 5. Publish to MQTT via AP
+      // 5. Encode Hardware Command & Publish
       await job.updateProgress(90);
       const mqtt = MqttService.getInstance();
-      await mqtt.publish(`/estation/${apId}/task`, {
+      
+      const payload = etagAdapter.encodeTask({
         taskId,
         tagId: targetId,
-        type: 'UPDATE',
-        payload: buffer.toString('base64'),
-        timestamp: Date.now()
+        payload: buffer.toString('base64') // Explicit Base64 for AP04
       });
 
-      logger.info({ taskId, apId, targetId, attempt: job.attemptsMade }, 'Payload dispatched to Access Point');
+      await mqtt.publish(`/estation/${apId}/taskESL`, payload);
+
+      logger.info({ taskId, apId, targetId, attempt: job.attemptsMade }, 'Binary payload dispatched to taskESL');
       await job.updateProgress(100);
       
       return { status: 'SENT', taskId };

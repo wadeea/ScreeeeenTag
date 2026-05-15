@@ -27,8 +27,9 @@ class DataService {
 
   public async query(text: string, params?: any[]) {
     // Graceful fallback for demo/preview without real Postgres
-    if (!process.env.DATABASE_URL) {
-      logger.warn({ text }, "Using mock response (DATABASE_URL missing)");
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl || dbUrl.includes('localhost') || dbUrl.includes('user:password')) {
+      logger.warn({ text }, "Using mock response (DATABASE_URL invalid or missing)");
       return this.mockQuery(text);
     }
 
@@ -72,7 +73,8 @@ class DataService {
   }
 
   public async getClient() {
-    if (!process.env.DATABASE_URL) {
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl || dbUrl.includes('localhost') || dbUrl.includes('user:password')) {
       // Return a mock client with a mock query method for transactions
       return {
         query: (text: string, params?: any[]) => this.mockQuery(text),

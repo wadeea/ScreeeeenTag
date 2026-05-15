@@ -4,6 +4,7 @@ import OverviewView from './components/OverviewView';
 import TagFleetView from './components/TagFleetView';
 import ProductsView from './components/ProductsView';
 import MockMobileScanner from './components/MockMobileScanner';
+import LoginView from './components/LoginView';
 import { useSocket } from './hooks/useSocket';
 import { useStore } from './store/useStore';
 import { 
@@ -17,10 +18,29 @@ import {
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const { error, setError } = useStore();
+  const { user, error, setError } = useStore();
   
   // Initialize real-time bridge
   useSocket();
+
+  // Guard: If no user, show login
+  if (!user) {
+    return (
+      <>
+        <LoginView />
+        {error && (
+          <div className="fixed bottom-6 right-6 bg-red-500 text-white px-6 py-4 rounded-xl shadow-2xl z-[100] flex items-center gap-4 animate-in slide-in-from-bottom-5">
+            <WifiOff className="w-5 h-5" />
+            <div className="flex-1">
+              <p className="text-sm font-bold">Authentication Error</p>
+              <p className="text-[10px] opacity-80">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="text-white/50 hover:text-white">✕</button>
+          </div>
+        )}
+      </>
+    );
+  }
 
   const renderView = () => {
     switch (activeTab) {

@@ -9,6 +9,8 @@ import { dbProvider } from './server/services/dbProvider';
 import { MqttService } from './server/services/mqttService';
 import { DeviceStateHandler } from './server/services/deviceStateHandler';
 import { QueueService } from './server/services/queueService';
+import { renderer } from './server/services/rendererService';
+import { getSpecFromId } from './server/constants/hardwareSpecs';
 // Import worker to ensure it starts
 import './server/workers/taskWorker';
 
@@ -56,7 +58,6 @@ async function startProductionServer() {
   app.post('/api/tags/bind', async (req, res) => {
     const { tag_id, sku } = req.body;
     
-    // transactional binding + task creation
     const client = await dbProvider.getClient();
     try {
       await client.query('BEGIN');
@@ -65,7 +66,18 @@ async function startProductionServer() {
       if (prodRes.rowCount === 0) throw new Error('Product SKU invalid');
       const productId = prodRes.rows[0].id;
 
-      // Upsert Binding
+      // 1. Auto-Detect Hardware Specs
+      const spec = getSpecFromId(tag_id);
+      
+      // 2. Ensure Tag exists with correct type
+      await client.query(
+        `INSERT INTO tags (id, type, status) 
+         VALUES ($1, $2, 'READY')
+         ON CONFLICT (id) DO UPDATE SET type = EXCLUDED.type`,
+        [tag_id, `${spec.model} (${spec.size})`]
+      );
+
+      // 3. Upsert Binding
       await client.query(
         `INSERT INTO bindings (tag_id, product_id, updated_at) 
          VALUES ($1, $2, NOW())
@@ -73,12 +85,11 @@ async function startProductionServer() {
         [tag_id, productId]
       );
 
-      // 4. Find Target Tag and AP (Needed for task record)
+      // 4. Find Target AP
       const tagRes = await client.query('SELECT current_ap_id FROM tags WHERE id = $1', [tag_id]);
-      if (tagRes.rowCount === 0) throw new Error(`Tag not found: ${tag_id}`);
-      const apId = tagRes.rows[0].current_ap_id;
+      const apId = tagRes.rows[0]?.current_ap_id || '01'; // Default or discovery
 
-      // Create Task with production fields
+      // Create Task
       const taskRes = await client.query(
         `INSERT INTO tasks (type, target_tag_id, ap_id, status)
          VALUES ($1, $2, $3, $4) RETURNING id`,
@@ -87,11 +98,9 @@ async function startProductionServer() {
       const taskId = taskRes.rows[0].id;
 
       await client.query('COMMIT');
-
-      // 3. Queue Background Job via BullMQ
       await QueueService.addTask({ taskId, targetId: tag_id, sku });
 
-      res.status(201).json({ success: true, taskId });
+      res.status(201).json({ success: true, taskId, detectedModel: spec.model });
     } catch (err: any) {
       await client.query('ROLLBACK');
       logger.error(err, 'Binding transaction failed');
@@ -109,6 +118,20 @@ async function startProductionServer() {
   app.get('/api/aps', async (req, res) => {
     const result = await dbProvider.query('SELECT * FROM access_points ORDER BY id ASC');
     res.json(result.rows);
+  });
+
+  app.get('/api/test/preview', async (req, res) => {
+    const product = {
+      name: 'Cabernet Sauvignon',
+      sku: 'WINE-750-RED',
+      price: 89.90,
+      currency: 'ILS'
+    };
+    
+    // Render using the high-res 7.5" profile
+    const buffer = await renderer.generateEInkBitmap(product as any, 800, 480);
+    res.setHeader('Content-Type', 'image/png');
+    res.send(buffer);
   });
 
   // 4. Vite Middleware / Static Serving

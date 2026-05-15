@@ -37,40 +37,57 @@ export class DeviceStateHandler {
     });
 
     // 2. Handle Task Results (SENT -> ACK -> DISPLAYED)
-    mqtt.on('task:result', async (data) => {
-      const { taskId, tagId, status, battery, rssi, type } = data;
-      logger.info({ taskId, tagId, status, type }, 'Task event received');
+    mqtt.on('task:result', async (results) => {
+      // AP04 Result Payload is an array of updates
+      for (const res of results) {
+        const { tagId, battery, rssi, status, token } = res;
+        logger.info({ tagId, rssi, battery }, 'Hardware feedback processing');
 
-      // Handle intermediate ACK stage
-      if (type === 'ACK') {
-        await dbProvider.query(
-          'UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2',
-          ['ACK', taskId]
+        // Find the most recent task for this tag that is in SENT or ACK state
+        const taskRes = await dbProvider.query(
+          `SELECT id FROM tasks 
+           WHERE target_tag_id = $1 AND status IN ('SENT', 'ACK', 'PENDING')
+           ORDER BY updated_at DESC LIMIT 1`,
+          [tagId]
         );
-        this.io.emit('task:update', { taskId, status: 'ACK' });
-        return;
+
+        const taskId = taskRes.rows[0]?.id;
+        const taskStatus = status === 'OK' ? 'DISPLAYED' : 'FAILED';
+
+        if (taskId) {
+          await dbProvider.query(
+            'UPDATE tasks SET status = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2',
+            [taskStatus, taskId]
+          );
+          this.io.emit('task:update', { taskId, status: taskStatus });
+        }
+
+        // Update Tag telemetry (Schema uses battery_level and rssi)
+        await dbProvider.query(
+          `UPDATE tags SET 
+           battery_level = $1, 
+           rssi = $2, 
+           last_seen = NOW(),
+           status = $3
+           WHERE id = $4`,
+          [battery, rssi, 'READY', tagId]
+        );
+
+        // Record History
+        await dbProvider.query(
+          `INSERT INTO tag_telemetry_history (tag_id, battery_level, rssi)
+           VALUES ($1, $2, $3)`,
+          [tagId, battery, rssi]
+        );
+
+        this.io.emit('tag:status', { 
+          tagId, 
+          battery_level: battery, 
+          rssi, 
+          status: 'READY', 
+          lastSeen: new Date() 
+        });
       }
-
-      // Handle final result stage (DISPLAYED / FAILED)
-      const taskStatus = status === 'OK' ? 'DISPLAYED' : 'FAILED';
-      await dbProvider.query(
-        'UPDATE tasks SET status = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2',
-        [taskStatus, taskId]
-      );
-
-      // Update Tag telemetry
-      await dbProvider.query(
-        `UPDATE tags SET 
-         battery_level = $1, 
-         signal_strength = $2, 
-         last_seen = NOW(),
-         status = $3
-         WHERE id = $4`,
-        [battery, rssi, 'READY', tagId]
-      );
-
-      this.io.emit('task:update', { taskId, status: taskStatus });
-      this.io.emit('tag:status', { tagId, battery, rssi, lastSeen: new Date() });
     });
   }
 }

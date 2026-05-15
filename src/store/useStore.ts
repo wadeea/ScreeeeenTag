@@ -3,6 +3,7 @@ import { Tag, AccessPoint, Task, Product } from '../types';
 import { api } from '../api/client';
 
 interface OmniState {
+  user: any | null;
   tags: Tag[];
   aps: AccessPoint[];
   tasks: Task[];
@@ -11,6 +12,8 @@ interface OmniState {
   error: string | null;
   
   // Actions
+  setUser: (user: any | null) => void;
+  logout: () => void;
   fetchData: () => Promise<void>;
   updateTag: (tag: Partial<Tag> & { id: string }) => void;
   updateTask: (task: Partial<Task> & { id: string }) => void;
@@ -19,12 +22,19 @@ interface OmniState {
 }
 
 export const useStore = create<OmniState>((set, get) => ({
+  user: JSON.parse(localStorage.getItem('omni_user') || 'null'),
   tags: [],
   aps: [],
   tasks: [],
   products: [],
   isLoading: false,
   error: null,
+
+  setUser: (user) => set({ user }),
+  logout: () => {
+    localStorage.removeItem('omni_user');
+    set({ user: null });
+  },
 
   fetchData: async () => {
     set({ isLoading: true, error: null });

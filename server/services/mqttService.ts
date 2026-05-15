@@ -14,20 +14,29 @@ export class MqttService extends EventEmitter {
   }
 
   private init() {
-    const brokerUrl = process.env.MQTT_URL || 'mqtt://localhost:1883';
+    let brokerUrl = process.env.MQTT_URL || 'mqtt://localhost:1883';
+    
+    // Ensure protocol is present
+    if (!brokerUrl.includes('://')) {
+      brokerUrl = `mqtts://${brokerUrl}`;
+    }
+
+    const isTls = brokerUrl.startsWith('mqtts://') || brokerUrl.includes(':8883');
     
     this.client = mqtt.connect(brokerUrl, {
-      clientId: `omni_esl_cloud_${Math.random().toString(16).slice(2)}`,
+      clientId: process.env.MQTT_CLIENT_ID || `omni_esl_cloud_${Math.random().toString(16).slice(2)}`,
       username: process.env.MQTT_USER,
       password: process.env.MQTT_PASS,
       protocolVersion: 5,
-      clean: false, // Persistent session for reliability
-      reconnectPeriod: 2000,
+      clean: true, 
+      reconnectPeriod: 5000,
       connectTimeout: 30 * 1000,
-      protocol: brokerUrl.startsWith('mqtts') ? 'mqtts' : 'mqtt',
-      rejectUnauthorized: false, // In many IoT setups we use self-signed certs initially
+      // HiveMQ Cloud specific requirements
+      rejectUnauthorized: true, // Should be true for production clouds
+      ALPNProtocols: ['mqtt'],
+      port: isTls ? 8883 : 1883,
       properties: {
-        sessionExpiryInterval: 3600 // 1 hour session persistence on broker side
+        sessionExpiryInterval: 3600
       },
       will: {
         topic: 'omni/cloud/status',
@@ -83,9 +92,8 @@ export class MqttService extends EventEmitter {
         const { interpreted, raw } = etagAdapter.parseHeartbeat(payload);
         this.emit('ap:heartbeat', { apId, ...interpreted, raw });
       } else if (type === 'result') {
-        // Result parsing will be handled in Phase 4/5
-        const data = JSON.parse(payload.toString());
-        this.emit('task:result', { apId, ...data });
+        const decoded = etagAdapter.decodeResult(payload);
+        this.emit('task:result', { apId, ...decoded });
       }
     } catch (err: any) {
       logger.warn({ topic, err: err.message }, 'Failed to parse MQTT message');
@@ -93,10 +101,12 @@ export class MqttService extends EventEmitter {
   }
 
   public async publish(topic: string, payload: any) {
+    const finalPayload = Buffer.isBuffer(payload) ? payload : JSON.stringify(payload);
+    
     return new Promise((resolve, reject) => {
       this.client?.publish(
         topic, 
-        JSON.stringify(payload), 
+        finalPayload, 
         { qos: 1, retain: false }, 
         (err) => {
           if (err) {
